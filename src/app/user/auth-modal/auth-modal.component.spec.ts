@@ -1,5 +1,4 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-
 import { AuthModalComponent } from './auth-modal.component';
 
 describe('AuthModalComponent', () => {
