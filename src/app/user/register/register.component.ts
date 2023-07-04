@@ -65,8 +65,6 @@ export class RegisterComponent {
     try {
       await this.auth.createUser(this.registerForm.value as IUser)
     } catch (error: any) {
-      console.log(error);
-
       if (error.code as string === 'auth/email-already-in-use') {
         this.alertMsg = 'The email address is already in use';
       } else {
