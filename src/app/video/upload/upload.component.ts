@@ -1,14 +1,11 @@
 import { Component, OnDestroy } from '@angular/core';
 import { FormControl, FormGroup, Validators } from '@angular/forms';
-import { AngularFireStorage, AngularFireUploadTask } from '@angular/fire/compat/storage';
 import { v4 as uuid } from 'uuid';
-import { switchMap } from 'rxjs/operators';
-import { AngularFireAuth } from '@angular/fire/compat/auth';
-import firebase from 'firebase/compat/app'
 import { ClipService } from 'src/app/services/clip.service';
+import { ApiService } from 'src/app/services/api.service';
+import { ClerkService } from 'src/app/services/clerk.service';
 import { Router } from '@angular/router';
 import { FfmpegService } from 'src/app/services/ffmpeg.service';
-import { combineLatest, forkJoin } from 'rxjs';
 
 @Component({
   selector: 'app-upload',
@@ -25,11 +22,9 @@ export class UploadComponent implements OnDestroy {
   inSubmission = false
   percentage = 0
   showPercentage = false
-  user: firebase.User | null = null
-  task?: AngularFireUploadTask
   screenshots: string[] = []
   selectedScreenshot = ''
-  screenshotTask?: AngularFireUploadTask
+  private uploadAborted = false
 
   title = new FormControl('', {
     validators: [
@@ -39,41 +34,36 @@ export class UploadComponent implements OnDestroy {
     nonNullable: true
   })
 
-  uploadForm = new FormGroup({
-    title: this.title
-  })
+  uploadForm = new FormGroup({ title: this.title })
 
-  constructor(private storage: AngularFireStorage, private auth: AngularFireAuth, private clipsService: ClipService, private router: Router, public ffmpegService: FfmpegService) {
-    auth.user.subscribe(user => this.user = user)
+  constructor(
+    private clipsService: ClipService,
+    private api: ApiService,
+    private clerkService: ClerkService,
+    private router: Router,
+    public ffmpegService: FfmpegService,
+  ) {
     this.ffmpegService.init()
   }
 
   ngOnDestroy(): void {
-    this.task?.cancel()
+    this.uploadAborted = true
   }
 
   async storeFile($event: Event) {
-    if (this.ffmpegService.isRunning) {
-      return
-    }
+    if (this.ffmpegService.isRunning) return
 
     this.isDragOver = false
 
-    this.file = ($event as DragEvent).dataTransfer ?
-      ($event as DragEvent).dataTransfer?.files.item(0) ?? null :
-      ($event.target as HTMLInputElement).files?.item(0) ?? null
+    this.file = ($event as DragEvent).dataTransfer
+      ? ($event as DragEvent).dataTransfer?.files.item(0) ?? null
+      : ($event.target as HTMLInputElement).files?.item(0) ?? null
 
-    if (!this.file || this.file.type !== 'video/mp4') {
-      return
-    }
+    if (!this.file || this.file.type !== 'video/mp4') return
 
     this.screenshots = await this.ffmpegService.getScreenshots(this.file)
-
     this.selectedScreenshot = this.screenshots[0]
-
-    this.title.setValue(
-      this.file.name.replace(/\.[^/.]+$/, '')
-    )
+    this.title.setValue(this.file.name.replace(/\.[^/.]+$/, ''))
     this.nextStep = true
   }
 
@@ -84,80 +74,87 @@ export class UploadComponent implements OnDestroy {
     this.alertMsg = 'Please wait! Your clip is being uploaded.'
     this.inSubmission = true
     this.showPercentage = true
-    const clipFileName = uuid()
-    const clipPath = `clips/${clipFileName}.mp4`
 
-    const screenshotBlob = await this.ffmpegService.blobFromURL(
-      this.selectedScreenshot
-    )
-    const screenshotPath = `screenshots/${clipFileName}.png`
+    const clipId = uuid()
+    const clipFileName = `${clipId}.mp4`
+    const screenshotFileName = `${clipId}.png`
 
-    this.task = this.storage.upload(clipPath, this.file)
-    const clipRef = this.storage.ref(clipPath)
+    const user = this.clerkService.user$.getValue()
 
-    this.screenshotTask = this.storage.upload(screenshotPath, screenshotBlob)
+    try {
+      // 1. Get presigned URLs for clip and screenshot
+      const [clipUpload, screenshotUpload] = await Promise.all([
+        this.api.post<{ uploadUrl: string; key: string }>('/api/upload', {
+          fileName: clipFileName,
+          contentType: 'video/mp4',
+        }),
+        this.api.post<{ uploadUrl: string; key: string }>('/api/upload-screenshot', {
+          fileName: screenshotFileName,
+        }),
+      ])
 
-    const screenshotRef = this.storage.ref(screenshotPath)
+      const screenshotBlob = await this.ffmpegService.blobFromURL(this.selectedScreenshot)
 
-    combineLatest([
-      this.task.percentageChanges(),
-      this.screenshotTask.percentageChanges()
-    ]).subscribe((progress) => {
-      const [clipProgress, screenshotProgress] = progress
+      // 2. Upload both to R2 via proxy upload (with XHR for clip progress)
+      await Promise.all([
+        this.uploadWithProgress(clipUpload.uploadUrl, this.file!, 'video/mp4'),
+        fetch(screenshotUpload.uploadUrl, {
+          method: 'PUT',
+          body: screenshotBlob,
+          headers: { 'Content-Type': 'image/png' },
+        }),
+      ])
 
-      if (!clipProgress || !screenshotProgress) {
-        return
-      }
+      if (this.uploadAborted) return
 
-      const total = clipProgress + screenshotProgress
+      // 3. Create clip record in D1
+      const result = await this.clipsService.createClip({
+        userId: user?.id ?? '',
+        displayName: user?.firstName ?? user?.username ?? 'Anonymous',
+        title: this.title.value,
+        fileName: clipFileName,
+        url: '',          // Worker derives from R2_PUBLIC_URL
+        screenshotUrl: '',
+        screenshotFileName,
+      })
 
-      this.percentage = total as number / 200
-    })
+      this.alertColor = 'green'
+      this.alertMsg = 'Success! Your clip is ready to be shared.'
+      this.showPercentage = false
 
-    forkJoin([
-      this.task.snapshotChanges(),
-      this.screenshotTask.snapshotChanges()
-    ]).pipe(
-      switchMap(() => forkJoin([
-        clipRef.getDownloadURL(),
-        screenshotRef.getDownloadURL()
-      ]))
-    ).subscribe({
-      next: async (urls) => {
-        const [clipURL, screenshotURL] = urls
+      setTimeout(() => {
+        this.router.navigate(['clip', result.id])
+      }, 1000)
 
-        const clip = {
-          uid: this.user?.uid as string,
-          displayName: this.user?.displayName as string,
-          title: this.title.value,
-          fileName: `${clipFileName}.mp4`,
-          url: clipURL,
-          screenshotURL,
-          screenshotFileName: `${clipFileName}.png`,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    } catch (error) {
+      this.uploadForm.enable()
+      this.alertColor = 'red'
+      this.alertMsg = 'Upload failed! Please try again.'
+      this.inSubmission = true
+      this.showPercentage = false
+      console.error(error)
+    }
+  }
+
+  private uploadWithProgress(url: string, file: File, contentType: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('PUT', url)
+      xhr.setRequestHeader('Content-Type', contentType)
+
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          this.percentage = event.loaded / event.total
         }
-        const clipDocRef = await this.clipsService.createClip(clip)
-        console.log(clip)
+      })
 
-        this.alertColor = 'green'
-        this.alertMsg = 'Success! your clip is ready to be shared'
-        this.showPercentage = false
-
-        setTimeout(() => {
-          this.router.navigate([
-            'clip', clipDocRef.id
-          ])
-        }, 1000);
-
-      },
-      error: (error) => {
-        this.uploadForm.enable()
-        this.alertColor = 'red'
-        this.alertMsg = 'Upload failed! Game Over.'
-        this.inSubmission = true
-        this.showPercentage = false
-        console.log(error)
-      }
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve()
+        else reject(new Error(`Upload failed: ${xhr.status}`))
+      })
+      xhr.addEventListener('error', () => reject(new Error('Upload network error')))
+      xhr.send(file)
     })
   }
 }
+

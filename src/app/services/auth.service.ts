@@ -1,78 +1,70 @@
 import { Injectable } from '@angular/core';
-import { AngularFireAuth } from '@angular/fire/compat/auth';
-import { AngularFirestore, AngularFirestoreCollection } from '@angular/fire/compat/firestore';
+import { Observable, from, map, delay, switchMap, of, filter } from 'rxjs';
+import { Router, NavigationEnd, ActivatedRoute } from '@angular/router';
+import { ClerkService } from './clerk.service';
+import { ApiService } from './api.service';
 import IUser from '../models/user.model';
-import { Observable, of } from 'rxjs';
-import { delay, map, filter, switchMap } from 'rxjs/operators'
-import { Router } from '@angular/router';
-import { ActivatedRoute, NavigationEnd } from '@angular/router';
 
 @Injectable({
   providedIn: 'root'
 })
 export class AuthService {
-
-  private usersCollection: AngularFirestoreCollection<IUser>;
   public isAuthenticated$: Observable<boolean>;
   public isAuthenticatedWithDelay$: Observable<boolean>;
   public redirect = false;
 
   constructor(
-    private auth: AngularFireAuth,
-    private db: AngularFirestore,
+    private clerkService: ClerkService,
+    private api: ApiService,
     private router: Router,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
   ) {
-    this.usersCollection = db.collection('users')
-    this.isAuthenticated$ = auth.user.pipe(
-      map(user => !!user)
-    )
-    this.isAuthenticatedWithDelay$ = this.isAuthenticated$.pipe(
-      delay(1500)
-    )
+    // Initialize Clerk on service creation
+    clerkService.load();
+
+    this.isAuthenticated$ = this.clerkService.session$.pipe(
+      map(session => !!session)
+    );
+
+    this.isAuthenticatedWithDelay$ = this.isAuthenticated$.pipe(delay(1500));
+
     this.router.events.pipe(
       filter(e => e instanceof NavigationEnd),
-      map(e => this.route.firstChild),
+      map(() => this.route.firstChild),
       switchMap(route => route?.data ?? of({ authOnly: false }))
     ).subscribe((data) => {
-      this.redirect = data.authOnly ?? false;
-    })
+      this.redirect = data['authOnly'] ?? false;
+    });
   }
 
   public async createUser(userData: IUser) {
     if (!userData.password) {
-      throw new Error("Password not provided!")
+      throw new Error('Password not provided!');
     }
 
-    const userCred = await this.auth.createUserWithEmailAndPassword(
-      userData.email, userData.password
-    )
+    await this.clerkService.signUp(
+      userData.email,
+      userData.password,
+      userData.name,
+    );
 
-    if (!userCred.user) {
-      throw new Error("User can't be found")
-    }
-
-    await this.usersCollection.doc(userCred.user.uid).set({
-      name: userData.name,
-      email: userData.email,
+    // Store extra fields (age, phone) in D1 via the Worker
+    await this.api.post('/api/users', {
       age: userData.age,
-      phoneNumber: userData.phoneNumber
-    })
-
-    await userCred.user.updateProfile({
-      displayName: userData.name
-    })
+      phoneNumber: userData.phoneNumber,
+    });
   }
 
   public async logout($event?: Event) {
     if ($event) {
-      $event.preventDefault()
+      $event.preventDefault();
     }
 
-    await this.auth.signOut()
+    await this.clerkService.signOut();
 
     if (this.redirect) {
-      await this.router.navigateByUrl('/')
+      this.router.navigate(['/']);
     }
   }
 }
+

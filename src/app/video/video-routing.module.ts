@@ -2,34 +2,21 @@ import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
 import { ManageComponent } from './manage/manage.component';
 import { UploadComponent } from './upload/upload.component';
-import { AngularFireAuthGuard, redirectUnauthorizedTo } from '@angular/fire/compat/auth-guard'
-
-const redirectUnauthorizedToHome = () => redirectUnauthorizedTo('/')
+import { AuthGuard } from 'src/app/shared/guards/auth.guard';
 
 const routes: Routes = [
   {
     path: 'manage',
     component: ManageComponent,
-    data: {
-      authOnly: true,
-      authGuardPipe: redirectUnauthorizedToHome
-    },
-    canActivate: [AngularFireAuthGuard]
+    data: { authOnly: true },
+    canActivate: [AuthGuard]
   },
   {
     path: 'upload',
     component: UploadComponent,
-    data: {
-      authOnly: true,
-      authGuardPipe: redirectUnauthorizedToHome
-    },
-    canActivate: [AngularFireAuthGuard]
+    data: { authOnly: true },
+    canActivate: [AuthGuard]
   },
-  //handle redirections if path changes
-  // {
-  //   path: 'manage-clips',
-  //   redirectTo: 'manage'
-  // }
 ];
 
 @NgModule({
@@ -37,3 +24,4 @@ const routes: Routes = [
   exports: [RouterModule]
 })
 export class VideoRoutingModule { }
+

@@ -1,125 +1,74 @@
 import { Injectable } from '@angular/core';
-import { AngularFirestore, AngularFirestoreCollection, DocumentReference, QuerySnapshot } from '@angular/fire/compat/firestore';
 import IClip from '../models/clip.model';
-import { AngularFireAuth } from '@angular/fire/compat/auth';
-import { switchMap, map } from 'rxjs/operators';
-import { of, BehaviorSubject, combineLatest } from 'rxjs';
-import { AngularFireStorage } from '@angular/fire/compat/storage';
+import { BehaviorSubject, Observable, from } from 'rxjs';
 import { Resolve, ActivatedRouteSnapshot, RouterStateSnapshot, Router } from "@angular/router"
+import { ApiService } from './api.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ClipService implements Resolve<IClip | null> {
-  public clipsCollection: AngularFirestoreCollection<IClip>
   pageClips: IClip[] = []
   pendingReq = false
+  private lastCreatedAt: string | null = null
 
   constructor(
-    private db: AngularFirestore,
-    private auth: AngularFireAuth,
-    private storage: AngularFireStorage,
-    private router: Router
-  ) {
-    this.clipsCollection = db.collection('clips')
+    private api: ApiService,
+    private router: Router,
+  ) {}
+
+  async createClip(data: Omit<IClip, 'id' | 'createdAt'>): Promise<{ id: string }> {
+    return this.api.post<{ id: string }>('/api/clips', data);
   }
 
-  createClip(data: IClip): Promise<DocumentReference<IClip>> {
-    return this.clipsCollection.add(data)
-  }
-
-  getUserClips(sort$: BehaviorSubject<string>) {
-    return combineLatest([
-      this.auth.user,
-      sort$
-    ]).pipe(
-      switchMap(values => {
-        const [user, sort] = values
-
-        if (!user) {
-          return of([])
+  getUserClips(sort$: BehaviorSubject<string>): Observable<IClip[]> {
+    return new Observable(observer => {
+      const sub = sort$.subscribe(async sort => {
+        const dir = sort === '1' ? 'desc' : 'asc';
+        try {
+          const clips = await this.api.get<IClip[]>(`/api/clips/my?sort=${dir}`);
+          observer.next(clips);
+        } catch (err) {
+          observer.error(err);
         }
-
-        const query = this.clipsCollection.ref.where(
-          'uid', '==', user.uid
-        ).orderBy(
-          'timestamp',
-          sort === '1' ? 'desc' : 'asc'
-        )
-
-        return query.get()
-      }),
-      map(snapshot => (snapshot as QuerySnapshot<IClip>).docs)
-    )
+      });
+      return () => sub.unsubscribe();
+    });
   }
 
-  updateClip(id: string, title: string) {
-    return this.clipsCollection.doc(id).update({
-      title
-    })
+  async updateClip(id: string, title: string): Promise<void> {
+    await this.api.put(`/api/clips/${id}`, { title });
   }
 
-  async deleteClip(clip: IClip) {
-    const clipRef = this.storage.ref(`clips/${clip.fileName}`)
-    const screenshotRef = this.storage.ref(
-      `screenshots/${clip.screenshotFileName}`
-    )
-
-    await clipRef.delete()
-    await screenshotRef.delete()
-
-    await this.clipsCollection.doc(clip.docID).delete()
+  async deleteClip(clip: IClip): Promise<void> {
+    await this.api.delete(`/api/clips/${clip.id}`);
   }
 
-  async getClips() {
-    if (this.pendingReq) {
-      return
+  async getClips(): Promise<void> {
+    if (this.pendingReq) return;
+    this.pendingReq = true;
+
+    const params = this.lastCreatedAt
+      ? `?cursor=${encodeURIComponent(this.lastCreatedAt)}`
+      : '';
+
+    const clips = await this.api.get<IClip[]>(`/api/clips${params}`);
+
+    this.pageClips.push(...clips);
+    if (clips.length > 0) {
+      this.lastCreatedAt = clips[clips.length - 1].createdAt;
     }
 
-    this.pendingReq = true
+    this.pendingReq = false;
+  }
 
-    let query = this.clipsCollection.ref.orderBy('timestamp', 'desc'
-    ).limit(6)
-
-    const { length } = this.pageClips
-
-    if (length) {
-      const lastDocID = this.pageClips[length - 1].docID
-      const lastDoc = await this.clipsCollection.doc(lastDocID)
-        .get()
-        .toPromise()
-
-      query = query.startAfter(lastDoc)
-    }
-
-    const snapshot = await query.get()
-
-    snapshot.forEach(doc => {
-      this.pageClips.push({
-        docID: doc.id,
-        ...doc.data()
+  resolve(route: ActivatedRouteSnapshot, _state: RouterStateSnapshot): Observable<IClip | null> {
+    return from(
+      this.api.get<IClip>(`/api/clips/${route.params['id']}`).catch(() => {
+        this.router.navigate(['/']);
+        return null as unknown as IClip;
       })
-    })
-
-    this.pendingReq = false
-  }
-
-  resolve(
-    route: ActivatedRouteSnapshot, state: RouterStateSnapshot
-  ) {
-    return this.clipsCollection.doc(route.params.id)
-      .get()
-      .pipe(
-        map(snapshot => {
-          const data = snapshot.data()
-
-          if (!data) {
-            this.router.navigate(['/'])
-            return null
-          }
-
-          return data
-        })
-      )
+    );
   }
 }
+

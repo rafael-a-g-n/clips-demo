@@ -1,10 +1,6 @@
 export const environment = {
   production: false,
-  firebase: {
-    apiKey: "AIzaSyBht9ajWF3LN5uPL0brX3-USR3FxNhBLPg",
-    authDomain: "twatch-c02df.firebaseapp.com",
-    projectId: "twatch-c02df",
-    storageBucket: "twatch-c02df.appspot.com",
-    appId: "1:752613596831:web:9eb785479193b93ef04caa"
-  }
+  clerkPublishableKey: 'pk_test_YWRhcHRpbmctaGF3ay0yMy5jbGVyay5hY2NvdW50cy5kZXYk',
+  apiUrl: 'https://clips-api.ragn.workers.dev',
+  r2PublicUrl: 'https://pub-32cdd46afc054974a62ae644bc2977e2.r2.dev',
 };

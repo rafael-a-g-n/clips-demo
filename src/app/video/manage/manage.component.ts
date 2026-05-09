@@ -30,15 +30,8 @@ export class ManageComponent {
       this.videoOrder = params.sort === '2' ? params.sort : '1'
       this.sort$.next(this.videoOrder)
     })
-    this.clipService.getUserClips(this.sort$).subscribe(docs => {
-      this.clips = []
-
-      docs.forEach(doc => {
-        this.clips.push({
-          docID: doc.id,
-          ...doc.data()
-        })
-      })
+    this.clipService.getUserClips(this.sort$).subscribe(clips => {
+      this.clips = clips;
     })
   }
 
@@ -63,7 +56,7 @@ export class ManageComponent {
 
   update($event: IClip) {
     this.clips.forEach((element, index) => {
-      if (element.docID == $event.docID) {
+      if (element.id == $event.id) {
         this.clips[index].title = $event.title
       }
     })
@@ -75,23 +68,24 @@ export class ManageComponent {
     this.clipService.deleteClip(clip)
 
     this.clips.forEach((element, index) => {
-      if (element.docID == clip.docID) {
+      if (element.id == clip.id) {
         this.clips.splice(index, 1)
       }
     })
   }
 
-  async copyToClipboard($event: MouseEvent, docID: string | undefined) {
+  async copyToClipboard($event: MouseEvent, id: string | undefined) {
     $event.preventDefault()
 
-    if (!docID) {
+    if (!id) {
       return
     }
 
-    const url = `${location.origin}/clip/${docID}`
+    const url = `${location.origin}/clip/${id}`
 
     await navigator.clipboard.writeText(url)
 
     alert('Link Copied')
   }
 }
+

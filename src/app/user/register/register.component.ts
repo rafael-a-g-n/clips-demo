@@ -3,7 +3,6 @@ import { FormGroup, FormControl, Validators } from '@angular/forms'
 import { AuthService } from 'src/app/services/auth.service';
 import IUser from 'src/app/models/user.model';
 import { RegisterValidators } from '../validators/register-validators';
-import { EmailTaken } from '../validators/email-taken';
 
 
 @Component({
@@ -13,10 +12,7 @@ import { EmailTaken } from '../validators/email-taken';
 })
 export class RegisterComponent {
 
-  constructor(
-    private auth: AuthService,
-    private emailTaken: EmailTaken
-  ) { }
+  constructor(private auth: AuthService) { }
 
   inSubmission = false
 
@@ -27,7 +23,7 @@ export class RegisterComponent {
   email = new FormControl('', [
     Validators.required,
     Validators.email
-  ], [this.emailTaken.validate])
+  ])
   age = new FormControl<number | null>(null, [
     Validators.required,
     Validators.min(18),
@@ -68,19 +64,18 @@ export class RegisterComponent {
     try {
       await this.auth.createUser(this.registerForm.value as IUser)
     } catch (error: any) {
-      if (error.code as string === 'auth/email-already-in-use') {
-        this.alertMsg = 'The email address is already in use';
+      const code: string = error?.errors?.[0]?.code ?? ''
+      if (code === 'form_identifier_exists') {
+        this.alertMsg = 'The email address is already in use.'
       } else {
-        this.alertMsg = 'An unexpected error occurred. Please try again later';
+        this.alertMsg = 'An unexpected error occurred. Please try again later.'
       }
       this.alertColor = 'red'
       this.inSubmission = false
       return
     }
 
-    this.alertMsg = 'Success! Your account has been created'
+    this.alertMsg = 'Success! Your account has been created.'
     this.alertColor = 'green'
   }
-
-
 }

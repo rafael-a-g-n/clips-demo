@@ -1,12 +1,11 @@
-import firebase from 'firebase/compat/app'
 export default interface IClip {
-  uid: string;
+  id?: string;
+  userId: string;
   displayName: string;
   title: string;
   fileName: string;
   url: string;
-  timestamp: firebase.firestore.FieldValue;
-  docID?: string;
-  screenshotURL: string;
+  screenshotUrl: string;
   screenshotFileName: string;
+  createdAt: string;  // ISO date string
 }
