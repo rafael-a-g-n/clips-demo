@@ -29,6 +29,7 @@ export class LoginComponent {
       await this.clerkService.signIn(this.credentials.email, this.credentials.password)
     } catch (error: any) {
       const code: string = error?.errors?.[0]?.code ?? ''
+      console.error('Clerk login error:', JSON.stringify(error?.errors ?? error))
       if (code === 'form_password_incorrect') {
         this.alertMsg = 'The password is invalid.'
       } else if (code === 'form_identifier_not_found') {
