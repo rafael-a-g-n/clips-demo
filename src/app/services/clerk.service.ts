@@ -16,7 +16,7 @@ export class ClerkService {
 
   async load(): Promise<void> {
     if (this._loaded) return;
-    this._clerk = new Clerk(environment.clerkPublishableKey);
+    this._clerk = new Clerk(environment.clerkPublishableKey, environment.clerkProxyUrl ? { proxyUrl: environment.clerkProxyUrl } : undefined);
     await this._clerk.load();
     this._loaded = true;
 
