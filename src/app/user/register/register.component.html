@@ -2,8 +2,23 @@
   {{ alertMsg }}
 </app-alert>
 
+<!-- Verification Code Form -->
+<form *ngIf="awaitingVerification" (ngSubmit)="verifyCode()">
+  <div class="mb-3">
+    <label class="inline-block mb-2">Verification Code</label>
+    <app-input [control]="verificationCode" placeholder="Enter 6-digit code"></app-input>
+  </div>
+  <button
+    type="submit"
+    class="block w-full bg-indigo-400 text-white py-1.5 px-3 rounded transition hover:bg-indigo-500 disabled:opacity-50 disabled:bg-indigo-400"
+    [disabled]="verificationCode.invalid || inSubmission"
+  >
+    Verify Email
+  </button>
+</form>
+
 <!-- Registration Form -->
-<form [formGroup]="registerForm" (ngSubmit)="register()">
+<form *ngIf="!awaitingVerification" [formGroup]="registerForm" (ngSubmit)="register()">
   <!-- Name -->
   <div class="mb-3">
     <label class="inline-block mb-2">Name</label>

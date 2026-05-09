@@ -37,22 +37,33 @@ export class AuthService {
     });
   }
 
-  public async createUser(userData: IUser) {
+  public async createUser(userData: IUser): Promise<'complete' | 'needs_verification'> {
     if (!userData.password) {
       throw new Error('Password not provided!');
     }
 
-    await this.clerkService.signUp(
+    const status = await this.clerkService.signUp(
       userData.email,
       userData.password,
       userData.name,
     );
 
-    // Store extra fields (age, phone) in D1 via the Worker
-    await this.api.post('/api/users', {
-      age: userData.age,
-      phoneNumber: userData.phoneNumber,
-    });
+    if (status === 'complete') {
+      await this.api.post('/api/users', {
+        age: userData.age,
+        phoneNumber: userData.phoneNumber,
+      });
+    }
+
+    return status;
+  }
+
+  public async verifyEmail(code: string): Promise<void> {
+    await this.clerkService.verifyEmail(code);
+  }
+
+  public async saveUserProfile(age: number | null, phoneNumber: string): Promise<void> {
+    await this.api.post('/api/users', { age, phoneNumber });
   }
 
   public async logout($event?: Event) {

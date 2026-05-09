@@ -55,7 +55,7 @@ export class ClerkService {
     email: string,
     password: string,
     firstName: string,
-  ): Promise<void> {
+  ): Promise<'complete' | 'needs_verification'> {
     const clerk = this.clerk;
     const result = await clerk.client!.signUp.create({
       emailAddress: email,
@@ -64,8 +64,20 @@ export class ClerkService {
     });
     if (result.status === 'complete') {
       await clerk.setActive({ session: result.createdSessionId });
+      return 'complete';
+    }
+    // Email verification required
+    await clerk.client!.signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
+    return 'needs_verification';
+  }
+
+  async verifyEmail(code: string): Promise<void> {
+    const clerk = this.clerk;
+    const result = await clerk.client!.signUp.attemptEmailAddressVerification({ code });
+    if (result.status === 'complete') {
+      await clerk.setActive({ session: result.createdSessionId });
     } else {
-      throw new Error('Sign up incomplete: ' + result.status);
+      throw new Error('Verification incomplete: ' + result.status);
     }
   }
 
